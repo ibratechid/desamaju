@@ -78,10 +78,16 @@ const Approval = {
 
     const actions = [
       { 
-        label: 'Lihat Detail & Approve', 
+        label: 'Approve', 
         icon: '✅', 
         action: 'approve', 
         type: 'success' 
+      },
+      { 
+        label: 'Reject', 
+        icon: '✕', 
+        action: 'reject', 
+        type: 'danger' 
       }
     ];
 
@@ -108,14 +114,17 @@ const Approval = {
 
       switch (action) {
         case 'approve':
-          this.showApprovalModal(letter.id, role);
+          this.showApprovalModal(letter.id, role, 'approve');
+          break;
+        case 'reject':
+          this.showApprovalModal(letter.id, role, 'reject');
           break;
       }
     });
   },
 
   // Show approval modal
-  showApprovalModal(letterId, role) {
+  showApprovalModal(letterId, role, actionType) {
     const letter = Letters.getById(letterId);
     if (!letter) {
       Toast.error('Error', 'Surat tidak ditemukan');
@@ -123,61 +132,97 @@ const Approval = {
     }
 
     const roleLabel = this.getRoleLabel(role);
+    const isApproveAction = actionType === 'approve';
+    const modalTitle = isApproveAction 
+      ? `Persetujuan ${roleLabel} - ${letter.letterNumber}`
+      : `Penolakan ${roleLabel} - ${letter.letterNumber}`;
 
-    const content = `
+    let content = `
       <div class="letter-detail">
         ${Letters.renderDetail(letterId)}
         <div style="margin-top:20px;">
-          <h4 style="margin-bottom:15px;">Aksi Persetujuan ${roleLabel}</h4>
+          <h4 style="margin-bottom:15px;">Aksi ${isApproveAction ? 'Persetujuan' : 'Penolakan'} ${roleLabel}</h4>
           <div class="form-group">
-            <label class="form-label">Catatan (Opsional)</label>
+            <label class="form-label">Catatan ${isApproveAction ? '(Opsional)' : '(Wajib diisi)'} </label>
             <textarea class="form-textarea" id="approvalNotes" rows="3" 
-                      placeholder="Tambahkan catatan jika diperlukan..."></textarea>
+                      placeholder="${isApproveAction ? 'Tambahkan catatan jika diperlukan...' : 'Silakan berikan alasan penolakan...'}" 
+                      ${!isApproveAction ? 'required' : ''}></textarea>
           </div>
-        </div>
-      </div>
     `;
 
+    if (role === 'kepala_desa' && isApproveAction) {
+      const signatures = JSON.parse(localStorage.getItem('desamaju.digital_signatures') || '{}');
+      const signatureOptions = Object.entries(signatures)
+        .map(([id, sig]) => `<option value="${id}">${Utils.sanitize(sig.name || id)}</option>`)
+        .join('');
+      
+      if (signatureOptions) {
+        content += `
+          <div class="form-group">
+            <label class="form-label">Pilih Tanda Tangan Digital</label>
+            <select class="form-select" id="signatureSelect">
+              <option value="">Pilih Tanda Tangan</option>
+              ${signatureOptions}
+            </select>
+          </div>
+        `;
+      }
+    }
+    
+    content += `</div></div>`;
+
+    const footerButtons = [];
+    if (isApproveAction) {
+      footerButtons.push(
+        { text: 'Tolak', type: 'danger', action: () => this.showApprovalModal(letterId, role, 'reject') },
+        { text: 'Batal', type: 'secondary', action: 'cancel' },
+        { text: `Setujui ${roleLabel}`, type: 'success', action: () => this.handleApprovalAction(letterId, role, 'approve') }
+      );
+    } else {
+      footerButtons.push(
+        { text: 'Batal', type: 'secondary', action: 'cancel' },
+        { text: `Tolak ${roleLabel}`, type: 'danger', action: () => this.handleApprovalAction(letterId, role, 'reject') }
+      );
+    }
+
     Modal.show({
-      title: `Persetujuan ${roleLabel} - ${letter.letterNumber}`,
+      title: modalTitle,
       content: content,
       size: 'large',
-      footerButtons: [
-        { text: 'Tolak', type: 'danger', action: 'reject' },
-        { text: 'Batal', type: 'secondary', action: 'cancel' },
-        { text: 'Setujui', type: 'success', action: 'approve' }
-      ]
+      footerButtons: footerButtons
     });
   },
 
-  // Approve letter
-  async approveLetter(letterId, role) {
-    const notes = document.getElementById('approvalNotes')?.value || '';
-    
-    try {
-      Letters.approve(letterId, role, notes);
-      Modal.hide();
-      Toast.success('Berhasil', `Surat berhasil disetujui oleh ${this.getRoleLabel(role)}`);
-      App.router.navigate(`persetujuan-${role}`);
-    } catch (error) {
-      Toast.error('Error', error.message);
-    }
+  // Get route name for approval navigation
+  getRoute(role) {
+    const routes = {
+      'rt': 'persetujuan-rt',
+      'rw': 'persetujuan-rw',
+      'kepala_desa': 'persetujuan-desa'
+    };
+    return routes[role] || 'dashboard';
   },
 
-  // Reject letter
-  async rejectLetter(letterId, role) {
+  // Handle approval or rejection action
+  async handleApprovalAction(letterId, role, actionType) {
     const notes = document.getElementById('approvalNotes')?.value || '';
-
-    if (!notes) {
+    
+    if (actionType === 'reject' && !notes) {
       Toast.warning('Peringatan', 'Harap isi alasan penolakan');
       return;
     }
 
     try {
-      Letters.reject(letterId, role, notes);
+      if (actionType === 'approve') {
+        Letters.approve(letterId, role, notes);
+        Toast.success('Berhasil', `Surat berhasil di-approve oleh ${this.getRoleLabel(role)}`);
+      } else {
+        Letters.reject(letterId, role, notes);
+        Toast.success('Berhasil', 'Surat berhasil ditolak');
+      }
+      
       Modal.hide();
-      Toast.success('Berhasil', 'Surat berhasil ditolak');
-      App.router.navigate(`persetujuan-${role}`);
+      App.navigate(this.getRoute(role));
     } catch (error) {
       Toast.error('Error', error.message);
     }

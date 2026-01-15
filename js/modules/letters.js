@@ -160,7 +160,15 @@ const Letters = {
     const letter = letters[index];
     const user = Auth.getCurrentUser();
 
-    letter.status = 'rejected';
+    // Update status based on role rejection workflow
+    if (role === 'rt') {
+      letter.status = 'pending'; // RT rejected, go back to pending for warga revision
+    } else if (role === 'rw') {
+      letter.status = 'pending'; // RW rejected, go back to pending for RT review
+    } else if (role === 'kepala_desa') {
+      letter.status = 'process'; // Kepala Desa rejected, go back to process for RW review
+    }
+    
     letter.approvals[role] = {
       approvedBy: user.id,
       approvedByName: user.name,
